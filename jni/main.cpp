@@ -11,12 +11,11 @@
 #define TAG "riski_aimbot"
 #define EXPORT __attribute__((visibility("default")))
 
-// ═══════════════════════════════════════════════════════
 // OFFSET ALYN SAMP (ARM 32-BIT)
-// ═══════════════════════════════════════════════════════
 #define OFF_PED_POOL           0x958E44u
 #define OFF_CAMERA             0x95B060u
-#define OFF_UPDATE_AIMING      0x44D97Cu // Alamat UpdateAimingCoors
+#define OFF_UPDATE_AIMING      0x44D97Cu 
+#define OFF_PROCESS_AIMING     0x43DB20u
 
 struct RwV3d { float x, y, z; };
 struct CPool {
@@ -25,7 +24,6 @@ struct CPool {
     int32_t m_nSize;        
 };
 
-// Fungsi internal game untuk update posisi aim camera
 typedef void (*fn_UpdateAimingCoors)(void* cam, RwV3d* target, float, float, float, bool);
 static fn_UpdateAimingCoors gUpdateAimingCoors = nullptr;
 
@@ -33,9 +31,6 @@ static CPool** g_pPedPool = nullptr;
 static uintptr_t g_Camera = 0;
 static bool g_ready = false;
 
-// ═══════════════════════════════════════════════════════
-// LOGIKA MENCARI TARGET TERDEKAT
-// ═══════════════════════════════════════════════════════
 float GetDistance(RwV3d a, RwV3d b) {
     return sqrt(pow(b.x - a.x, 2) + pow(b.y - a.y, 2) + pow(b.z - a.z, 2));
 }
@@ -43,22 +38,20 @@ float GetDistance(RwV3d a, RwV3d b) {
 uintptr_t GetClosestPlayer() {
     if (!g_pPedPool || !(*g_pPedPool)) return 0;
     CPool* pool = *g_pPedPool;
+    uintptr_t localPed = (uintptr_t)pool->m_pObjects; 
+    if (!localPed) return 0;
 
-    uintptr_t localPlayer = (uintptr_t)pool->m_pObjects; // Slot 0 biasanya local player
-    RwV3d localPos = *(RwV3d*)(localPlayer + 0x04);
-
+    RwV3d localPos = *(RwV3d*)(localPed + 0x04);
     uintptr_t target = 0;
-    float minDist = 50.0f; // Range Aimbot (50 meter)
+    float minDist = 60.0f; // Radius 60 meter
 
-    for (int i = 1; i < pool->m_nSize; i++) { // Mulai dari i=1 agar tidak mengunci diri sendiri
+    for (int i = 1; i < pool->m_nSize; i++) {
         if (pool->m_byteMap[i] & 0x80) continue; 
-
         uintptr_t ped = (uintptr_t)pool->m_pObjects + (i * 0x7C4);
         if (ped < 0x100000) continue;
 
         RwV3d pedPos = *(RwV3d*)(ped + 0x04);
         float dist = GetDistance(localPos, pedPos);
-
         if (dist < minDist) {
             minDist = dist;
             target = ped;
@@ -67,59 +60,46 @@ uintptr_t GetClosestPlayer() {
     return target;
 }
 
-// ═══════════════════════════════════════════════════════
-// HOOKING UPDATE AIMING
-// ═══════════════════════════════════════════════════════
 typedef void (*fn_CamProcess)(void* self);
 static fn_CamProcess gOCamProcess = nullptr;
 
 void hook_CamProcess(void* self) {
     if (gOCamProcess) gOCamProcess(self);
+    if (!g_ready) return;
 
-    if (g_ready) {
-        uintptr_t targetPed = GetClosestPlayer();
-        if (targetPed) {
-            RwV3d headPos;
-            uintptr_t pMatrix = *(uintptr_t*)(targetPed + 0x14);
-            
-            // Anti-Crash Pointer Check (Fix 0x3F800030)
-            if (pMatrix > 0x40000000 && (pMatrix % 4 == 0)) {
-                headPos = *(RwV3d*)(pMatrix + 0x30);
-            } else {
-                headPos = *(RwV3d*)(targetPed + 0x04);
-            }
-            
-            headPos.z += 0.7f; // Kunci ke arah kepala
+    uintptr_t target = GetClosestPlayer();
+    if (target) {
+        RwV3d head;
+        uintptr_t pMatrix = *(uintptr_t*)(target + 0x14);
+        // Pointer Guard (Fix SIGSEGV 0x3F800030)
+        if (pMatrix > 0x40000000 && (pMatrix % 4 == 0)) {
+            head = *(RwV3d*)(pMatrix + 0x30);
+        } else {
+            head = *(RwV3d*)(target + 0x04);
+        }
+        head.z += 0.75f; // Kunci ke kepala
 
-            // Panggil UpdateAimingCoors untuk memaksa camera mengunci target
-            if (gUpdateAimingCoors && g_Camera) {
-                gUpdateAimingCoors((void*)g_Camera, &headPos, 0.0f, 0.0f, 0.0f, true);
-            }
+        if (gUpdateAimingCoors && g_Camera) {
+            gUpdateAimingCoors((void*)g_Camera, &head, 0.0f, 0.0f, 0.0f, true);
         }
     }
 }
 
-// ═══════════════════════════════════════════════════════
-// INIT THREAD
-// ═══════════════════════════════════════════════════════
-static int find_lib_base(struct dl_phdr_info *info, size_t size, void *data) {
+static int find_base(struct dl_phdr_info *info, size_t size, void *data) {
     if (strstr(info->dlpi_name, "libGTASA.so")) {
         *(uintptr_t *)data = info->dlpi_addr;
-        return 1; 
+        return 1;
     }
     return 0;
 }
 
-#define T_PTR(a) ((void*)((a) | 1u))
-
 static void* init_thread(void*) {
     uintptr_t base = 0;
     while (base == 0) {
-        dl_iterate_phdr(find_lib_base, &base);
+        dl_iterate_phdr(find_base, &base);
         sleep(1);
     }
-    
-    sleep(8); // Delay aman
+    sleep(8);
 
     void* hDobby = dlopen("libdobby.so", RTLD_NOW | RTLD_GLOBAL);
     if (!hDobby) return nullptr;
@@ -127,21 +107,15 @@ static void* init_thread(void*) {
 
     g_pPedPool = (CPool**)(base + OFF_PED_POOL);
     g_Camera   = (base + OFF_CAMERA);
-    gUpdateAimingCoors = (fn_UpdateAimingCoors)T_PTR(base + OFF_UPDATE_AIMING);
+    gUpdateAimingCoors = (fn_UpdateAimingCoors)((base + OFF_UPDATE_AIMING) | 1u);
 
-    // Hook di fungsi Camera Process (Proses Aiming Weapon)
-    void* targetHook = T_PTR(base + 0x43DB20u); // Offset Process_AimWeapon
-    dobbyHook(targetHook, (void*)hook_CamProcess, (void**)&gOCamProcess);
-
+    dobbyHook((void*)((base + OFF_PROCESS_AIMING) | 1u), (void*)hook_CamProcess, (void**)&gOCamProcess);
     g_ready = true;
     return nullptr;
 }
 
 extern "C" {
-    EXPORT void* __GetModInfo() {
-        return (void*)"riski_aimbot|1.0|Aimbot Auto-Head|ahayriski";
-    }
-
+    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|1.1|Aimbot Head Fix|ahayriski"; }
     EXPORT void OnModLoad() {
         pthread_t t;
         pthread_create(&t, nullptr, init_thread, nullptr);
