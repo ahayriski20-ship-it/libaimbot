@@ -9,8 +9,10 @@ jobs:
         uses: nvioletti/setup-ndk@v1
         with:
           ndk-version: r21e
-      - name: Build with ndk-build
-        run: ndk-build -C jni/
+      - name: Build with ndk-build (Fixed Path)
+        run: |
+          export PATH=$ANDROID_NDK_HOME:$PATH
+          ndk-build NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=jni/Android.mk NDK_APPLICATION_MK=jni/Application.mk
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:

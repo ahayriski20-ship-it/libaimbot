@@ -16,7 +16,7 @@
 #define OFF_CAMERA             0x95B060u
 #define OFF_UPDATE_AIMING      0x44D97Cu 
 #define OFF_PROCESS_AIMING     0x43DB20u
-#define OFF_GET_BONE_POS       0x5E4280u // Offset baru dari Termux/Lua
+#define OFF_GET_BONE_POS       0x5E4280u 
 
 struct RwV3d { float x, y, z; };
 struct CPool {
@@ -28,7 +28,6 @@ struct CPool {
 typedef void (*fn_UpdateAimingCoors)(void* cam, RwV3d* target, float, float, float, bool);
 static fn_UpdateAimingCoors gUpdateAimingCoors = nullptr;
 
-// Fungsi GetBonePosition sesuai signature __thiscall
 typedef int (*fn_GetBonePosition)(void* ped, RwV3d* outPos, int boneId, bool updateBones);
 static fn_GetBonePosition gGetBonePosition = nullptr;
 
@@ -36,8 +35,12 @@ static CPool** g_pPedPool = nullptr;
 static uintptr_t g_Camera = 0;
 static bool g_ready = false;
 
+// FIX COMPILER: Hindari powf yang sering bikin build error
 float GetDistance(RwV3d a, RwV3d b) {
-    return sqrtf(powf(b.x - a.x, 2) + powf(b.y - a.y, 2) + powf(b.z - a.z, 2));
+    float dx = b.x - a.x;
+    float dy = b.y - a.y;
+    float dz = b.z - a.z;
+    return sqrtf(dx*dx + dy*dy + dz*dz);
 }
 
 uintptr_t GetClosestPlayer() {
@@ -49,7 +52,7 @@ uintptr_t GetClosestPlayer() {
 
     RwV3d localPos = *(RwV3d*)(localPed + 0x04);
     uintptr_t target = 0;
-    float minDist = 60.0f; // Jarak lock
+    float minDist = 60.0f; 
 
     for (int i = 1; i < pool->m_nSize; i++) {
         if (pool->m_byteMap[i] & 0x80) continue; 
@@ -79,20 +82,17 @@ void hook_CamProcess(void* self) {
     if (target && gGetBonePosition && gUpdateAimingCoors && g_Camera) {
         RwV3d headPos = {0.0f, 0.0f, 0.0f};
         
-        // Memanggil fungsi GetBonePosition (Bone ID 8 = Kepala)
-        // Parameter: (pointer_ped, &output_posisi, bone_id, update_matrix)
+        // Memanggil fungsi internal untuk tulang kepala (Bone ID 8)
         gGetBonePosition((void*)target, &headPos, 8, false);
 
-        // Pastikan kordinat kepala berhasil didapat
         if (headPos.x != 0.0f && headPos.y != 0.0f) {
-            // Lock kamera ke kepala
             gUpdateAimingCoors((void*)g_Camera, &headPos, 0.0f, 0.0f, 0.0f, true);
         }
     }
 }
 
 static int find_base(struct dl_phdr_info *info, size_t size, void *data) {
-    if (strstr(info->dlpi_name, "libGTASA.so")) {
+    if (info->dlpi_name && strstr(info->dlpi_name, "libGTASA.so")) {
         *(uintptr_t *)data = info->dlpi_addr;
         return 1;
     }
@@ -116,11 +116,9 @@ static void* init_thread(void*) {
     g_pPedPool = (CPool**)(base + OFF_PED_POOL);
     g_Camera   = (base + OFF_CAMERA);
     
-    // Inisialisasi fungsi internal game
     gUpdateAimingCoors = (fn_UpdateAimingCoors)T_PTR(base + OFF_UPDATE_AIMING);
     gGetBonePosition   = (fn_GetBonePosition)T_PTR(base + OFF_GET_BONE_POS);
 
-    // Hook fungsi aim kamera
     dobbyHook((void*)T_PTR(base + OFF_PROCESS_AIMING), (void*)hook_CamProcess, (void**)&gOCamProcess);
     
     g_ready = true;
