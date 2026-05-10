@@ -1,18 +1,13 @@
 name: Build Aimbot
-on: [push]
+on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup NDK
-        uses: nvioletti/setup-ndk@v1
-        with:
-          ndk-version: r21e
-      - name: Build with ndk-build (Fixed Path)
+      - name: Build with Built-in NDK
         run: |
-          export PATH=$ANDROID_NDK_HOME:$PATH
-          ndk-build NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=jni/Android.mk NDK_APPLICATION_MK=jni/Application.mk
+          $ANDROID_NDK_LATEST_HOME/ndk-build NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=jni/Android.mk NDK_APPLICATION_MK=jni/Application.mk
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:

@@ -7,6 +7,7 @@
 #include <cstring>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h> // FIX COMPILER: Wajib ada untuk uintptr_t & uint8_t
 
 #define TAG "riski_aimbot"
 #define EXPORT __attribute__((visibility("default")))
@@ -25,7 +26,7 @@ struct CPool {
     int32_t m_nSize;        
 };
 
-typedef void (*fn_UpdateAimingCoors)(void* cam, RwV3d* target, float, float, float, bool);
+typedef void (*fn_UpdateAimingCoors)(void* cam, RwV3d* target, float a, float b, float c, bool d);
 static fn_UpdateAimingCoors gUpdateAimingCoors = nullptr;
 
 typedef int (*fn_GetBonePosition)(void* ped, RwV3d* outPos, int boneId, bool updateBones);
@@ -35,7 +36,6 @@ static CPool** g_pPedPool = nullptr;
 static uintptr_t g_Camera = 0;
 static bool g_ready = false;
 
-// FIX COMPILER: Hindari powf yang sering bikin build error
 float GetDistance(RwV3d a, RwV3d b) {
     float dx = b.x - a.x;
     float dy = b.y - a.y;
@@ -52,7 +52,7 @@ uintptr_t GetClosestPlayer() {
 
     RwV3d localPos = *(RwV3d*)(localPed + 0x04);
     uintptr_t target = 0;
-    float minDist = 60.0f; 
+    float minDist = 60.0f; // Jarak kunci 60 meter
 
     for (int i = 1; i < pool->m_nSize; i++) {
         if (pool->m_byteMap[i] & 0x80) continue; 
@@ -82,10 +82,12 @@ void hook_CamProcess(void* self) {
     if (target && gGetBonePosition && gUpdateAimingCoors && g_Camera) {
         RwV3d headPos = {0.0f, 0.0f, 0.0f};
         
-        // Memanggil fungsi internal untuk tulang kepala (Bone ID 8)
+        // Memanggil fungsi GetBonePosition internal dari game
+        // Parameter: (pointer_ped, &output_posisi, bone_id_kepala_8, update_matrix)
         gGetBonePosition((void*)target, &headPos, 8, false);
 
         if (headPos.x != 0.0f && headPos.y != 0.0f) {
+            // Lock kamera persis ke kordinat tulang kepala
             gUpdateAimingCoors((void*)g_Camera, &headPos, 0.0f, 0.0f, 0.0f, true);
         }
     }
@@ -107,7 +109,7 @@ static void* init_thread(void*) {
         dl_iterate_phdr(find_base, &base);
         sleep(1);
     }
-    sleep(10);
+    sleep(10); // Menunggu module SA-MP siap
 
     void* hDobby = dlopen("libdobby.so", RTLD_NOW | RTLD_GLOBAL);
     if (!hDobby) return nullptr;
@@ -126,7 +128,7 @@ static void* init_thread(void*) {
 }
 
 extern "C" {
-    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|2.0|Bone Aimbot|ahayriski"; }
+    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|3.0|Bone Aimbot Perfect|ahayriski"; }
     EXPORT void OnModLoad() {
         pthread_t t;
         pthread_create(&t, nullptr, init_thread, nullptr);
