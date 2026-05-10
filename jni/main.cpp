@@ -32,26 +32,30 @@ static uintptr_t g_Camera = 0;
 static bool g_ready = false;
 
 float GetDistance(RwV3d a, RwV3d b) {
-    return sqrt(pow(b.x - a.x, 2) + pow(b.y - a.y, 2) + pow(b.z - a.z, 2));
+    return sqrtf(powf(b.x - a.x, 2) + powf(b.y - a.y, 2) + powf(b.z - a.z, 2));
 }
 
 uintptr_t GetClosestPlayer() {
     if (!g_pPedPool || !(*g_pPedPool)) return 0;
     CPool* pool = *g_pPedPool;
+    
+    // Ambil posisi Local Player (biasanya index 0)
     uintptr_t localPed = (uintptr_t)pool->m_pObjects; 
-    if (!localPed) return 0;
+    if (!localPed || (pool->m_byteMap[0] & 0x80)) return 0;
 
     RwV3d localPos = *(RwV3d*)(localPed + 0x04);
     uintptr_t target = 0;
     float minDist = 60.0f; // Radius 60 meter
 
-    for (int i = 1; i < pool->m_nSize; i++) {
+    for (int i = 1; i < pool->m_nSize; i++) { // Lewati local player (i=0)
         if (pool->m_byteMap[i] & 0x80) continue; 
+        
         uintptr_t ped = (uintptr_t)pool->m_pObjects + (i * 0x7C4);
         if (ped < 0x100000) continue;
 
         RwV3d pedPos = *(RwV3d*)(ped + 0x04);
         float dist = GetDistance(localPos, pedPos);
+        
         if (dist < minDist) {
             minDist = dist;
             target = ped;
@@ -71,15 +75,17 @@ void hook_CamProcess(void* self) {
     if (target) {
         RwV3d head;
         uintptr_t pMatrix = *(uintptr_t*)(target + 0x14);
-        // Pointer Guard (Fix SIGSEGV 0x3F800030)
-        if (pMatrix > 0x40000000 && (pMatrix % 4 == 0)) {
+        
+        // Anti-Crash 0x3F800030 Guard
+        if (pMatrix > 0x10000000 && (pMatrix % 4 == 0) && pMatrix < 0xF0000000) {
             head = *(RwV3d*)(pMatrix + 0x30);
         } else {
             head = *(RwV3d*)(target + 0x04);
         }
-        head.z += 0.75f; // Kunci ke kepala
+        head.z += 0.75f; // Lock ke Kepala
 
         if (gUpdateAimingCoors && g_Camera) {
+            // Memaksa kamera mengarah ke koordinat target
             gUpdateAimingCoors((void*)g_Camera, &head, 0.0f, 0.0f, 0.0f, true);
         }
     }
@@ -99,7 +105,7 @@ static void* init_thread(void*) {
         dl_iterate_phdr(find_base, &base);
         sleep(1);
     }
-    sleep(8);
+    sleep(10); // Tunggu sampai player spawn sempurna
 
     void* hDobby = dlopen("libdobby.so", RTLD_NOW | RTLD_GLOBAL);
     if (!hDobby) return nullptr;
@@ -109,13 +115,15 @@ static void* init_thread(void*) {
     g_Camera   = (base + OFF_CAMERA);
     gUpdateAimingCoors = (fn_UpdateAimingCoors)((base + OFF_UPDATE_AIMING) | 1u);
 
+    // Hook di fungsi internal camera proses senjata
     dobbyHook((void*)((base + OFF_PROCESS_AIMING) | 1u), (void*)hook_CamProcess, (void**)&gOCamProcess);
+    
     g_ready = true;
     return nullptr;
 }
 
 extern "C" {
-    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|1.1|Aimbot Head Fix|ahayriski"; }
+    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|1.2|Aimbot Smooth Fix|ahayriski"; }
     EXPORT void OnModLoad() {
         pthread_t t;
         pthread_create(&t, nullptr, init_thread, nullptr);
