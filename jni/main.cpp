@@ -7,12 +7,12 @@
 #include <cstring>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h> // FIX COMPILER: Wajib ada untuk uintptr_t & uint8_t
+#include <stdint.h>
+#include <cmath>
 
 #define TAG "riski_aimbot"
 #define EXPORT __attribute__((visibility("default")))
 
-// OFFSET ALYN SAMP (ARM 32-BIT)
 #define OFF_PED_POOL           0x958E44u
 #define OFF_CAMERA             0x95B060u
 #define OFF_UPDATE_AIMING      0x44D97Cu 
@@ -37,32 +37,26 @@ static uintptr_t g_Camera = 0;
 static bool g_ready = false;
 
 float GetDistance(RwV3d a, RwV3d b) {
-    float dx = b.x - a.x;
-    float dy = b.y - a.y;
-    float dz = b.z - a.z;
-    return sqrtf(dx*dx + dy*dy + dz*dz);
+    return std::sqrt(std::pow(b.x - a.x, 2) + std::pow(b.y - a.y, 2) + std::pow(b.z - a.z, 2));
 }
 
 uintptr_t GetClosestPlayer() {
     if (!g_pPedPool || !(*g_pPedPool)) return 0;
     CPool* pool = *g_pPedPool;
-    
     uintptr_t localPed = (uintptr_t)pool->m_pObjects; 
-    if (!localPed || (pool->m_byteMap[0] & 0x80)) return 0;
+    if (!localPed) return 0;
 
     RwV3d localPos = *(RwV3d*)(localPed + 0x04);
     uintptr_t target = 0;
-    float minDist = 60.0f; // Jarak kunci 60 meter
+    float minDist = 60.0f;
 
     for (int i = 1; i < pool->m_nSize; i++) {
         if (pool->m_byteMap[i] & 0x80) continue; 
-        
         uintptr_t ped = (uintptr_t)pool->m_pObjects + (i * 0x7C4);
         if (ped < 0x100000) continue;
 
         RwV3d pedPos = *(RwV3d*)(ped + 0x04);
         float dist = GetDistance(localPos, pedPos);
-        
         if (dist < minDist) {
             minDist = dist;
             target = ped;
@@ -81,13 +75,9 @@ void hook_CamProcess(void* self) {
     uintptr_t target = GetClosestPlayer();
     if (target && gGetBonePosition && gUpdateAimingCoors && g_Camera) {
         RwV3d headPos = {0.0f, 0.0f, 0.0f};
-        
-        // Memanggil fungsi GetBonePosition internal dari game
-        // Parameter: (pointer_ped, &output_posisi, bone_id_kepala_8, update_matrix)
-        gGetBonePosition((void*)target, &headPos, 8, false);
+        gGetBonePosition((void*)target, &headPos, 8, false); // Bone 8 = Head
 
-        if (headPos.x != 0.0f && headPos.y != 0.0f) {
-            // Lock kamera persis ke kordinat tulang kepala
+        if (headPos.x != 0.0f) {
             gUpdateAimingCoors((void*)g_Camera, &headPos, 0.0f, 0.0f, 0.0f, true);
         }
     }
@@ -101,15 +91,13 @@ static int find_base(struct dl_phdr_info *info, size_t size, void *data) {
     return 0;
 }
 
-#define T_PTR(a) ((void*)((a) | 1u))
-
 static void* init_thread(void*) {
     uintptr_t base = 0;
     while (base == 0) {
         dl_iterate_phdr(find_base, &base);
         sleep(1);
     }
-    sleep(10); // Menunggu module SA-MP siap
+    sleep(10);
 
     void* hDobby = dlopen("libdobby.so", RTLD_NOW | RTLD_GLOBAL);
     if (!hDobby) return nullptr;
@@ -117,18 +105,16 @@ static void* init_thread(void*) {
 
     g_pPedPool = (CPool**)(base + OFF_PED_POOL);
     g_Camera   = (base + OFF_CAMERA);
-    
-    gUpdateAimingCoors = (fn_UpdateAimingCoors)T_PTR(base + OFF_UPDATE_AIMING);
-    gGetBonePosition   = (fn_GetBonePosition)T_PTR(base + OFF_GET_BONE_POS);
+    gUpdateAimingCoors = (fn_UpdateAimingCoors)((base + OFF_UPDATE_AIMING) | 1u);
+    gGetBonePosition   = (fn_GetBonePosition)((base + OFF_GET_BONE_POS) | 1u);
 
-    dobbyHook((void*)T_PTR(base + OFF_PROCESS_AIMING), (void*)hook_CamProcess, (void**)&gOCamProcess);
-    
+    dobbyHook((void*)((base + OFF_PROCESS_AIMING) | 1u), (void*)hook_CamProcess, (void**)&gOCamProcess);
     g_ready = true;
     return nullptr;
 }
 
 extern "C" {
-    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|3.0|Bone Aimbot Perfect|ahayriski"; }
+    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|4.0|Bone Aimbot Final|ahayriski"; }
     EXPORT void OnModLoad() {
         pthread_t t;
         pthread_create(&t, nullptr, init_thread, nullptr);
