@@ -16,6 +16,7 @@
 #define OFF_CAMERA             0x95B060u
 #define OFF_UPDATE_AIMING      0x44D97Cu 
 #define OFF_PROCESS_AIMING     0x43DB20u
+#define OFF_GET_BONE_POS       0x5E4280u // Offset baru dari Termux/Lua
 
 struct RwV3d { float x, y, z; };
 struct CPool {
@@ -26,6 +27,10 @@ struct CPool {
 
 typedef void (*fn_UpdateAimingCoors)(void* cam, RwV3d* target, float, float, float, bool);
 static fn_UpdateAimingCoors gUpdateAimingCoors = nullptr;
+
+// Fungsi GetBonePosition sesuai signature __thiscall
+typedef int (*fn_GetBonePosition)(void* ped, RwV3d* outPos, int boneId, bool updateBones);
+static fn_GetBonePosition gGetBonePosition = nullptr;
 
 static CPool** g_pPedPool = nullptr; 
 static uintptr_t g_Camera = 0;
@@ -39,13 +44,12 @@ uintptr_t GetClosestPlayer() {
     if (!g_pPedPool || !(*g_pPedPool)) return 0;
     CPool* pool = *g_pPedPool;
     
-    // Ambil posisi Local Player (index 0)
     uintptr_t localPed = (uintptr_t)pool->m_pObjects; 
     if (!localPed || (pool->m_byteMap[0] & 0x80)) return 0;
 
     RwV3d localPos = *(RwV3d*)(localPed + 0x04);
     uintptr_t target = 0;
-    float minDist = 60.0f; // Jarak kunci 60 meter
+    float minDist = 60.0f; // Jarak lock
 
     for (int i = 1; i < pool->m_nSize; i++) {
         if (pool->m_byteMap[i] & 0x80) continue; 
@@ -72,20 +76,17 @@ void hook_CamProcess(void* self) {
     if (!g_ready) return;
 
     uintptr_t target = GetClosestPlayer();
-    if (target) {
-        RwV3d head;
-        uintptr_t pMatrix = *(uintptr_t*)(target + 0x14);
+    if (target && gGetBonePosition && gUpdateAimingCoors && g_Camera) {
+        RwV3d headPos = {0.0f, 0.0f, 0.0f};
         
-        // Anti-Crash 0x3F800030 Guard
-        if (pMatrix > 0x10000000 && (pMatrix % 4 == 0) && pMatrix < 0xF0000000) {
-            head = *(RwV3d*)(pMatrix + 0x30);
-        } else {
-            head = *(RwV3d*)(target + 0x04);
-        }
-        head.z += 0.75f; // Kunci Tepat di Kepala
+        // Memanggil fungsi GetBonePosition (Bone ID 8 = Kepala)
+        // Parameter: (pointer_ped, &output_posisi, bone_id, update_matrix)
+        gGetBonePosition((void*)target, &headPos, 8, false);
 
-        if (gUpdateAimingCoors && g_Camera) {
-            gUpdateAimingCoors((void*)g_Camera, &head, 0.0f, 0.0f, 0.0f, true);
+        // Pastikan kordinat kepala berhasil didapat
+        if (headPos.x != 0.0f && headPos.y != 0.0f) {
+            // Lock kamera ke kepala
+            gUpdateAimingCoors((void*)g_Camera, &headPos, 0.0f, 0.0f, 0.0f, true);
         }
     }
 }
@@ -97,6 +98,8 @@ static int find_base(struct dl_phdr_info *info, size_t size, void *data) {
     }
     return 0;
 }
+
+#define T_PTR(a) ((void*)((a) | 1u))
 
 static void* init_thread(void*) {
     uintptr_t base = 0;
@@ -112,16 +115,20 @@ static void* init_thread(void*) {
 
     g_pPedPool = (CPool**)(base + OFF_PED_POOL);
     g_Camera   = (base + OFF_CAMERA);
-    gUpdateAimingCoors = (fn_UpdateAimingCoors)((base + OFF_UPDATE_AIMING) | 1u);
+    
+    // Inisialisasi fungsi internal game
+    gUpdateAimingCoors = (fn_UpdateAimingCoors)T_PTR(base + OFF_UPDATE_AIMING);
+    gGetBonePosition   = (fn_GetBonePosition)T_PTR(base + OFF_GET_BONE_POS);
 
-    dobbyHook((void*)((base + OFF_PROCESS_AIMING) | 1u), (void*)hook_CamProcess, (void**)&gOCamProcess);
+    // Hook fungsi aim kamera
+    dobbyHook((void*)T_PTR(base + OFF_PROCESS_AIMING), (void*)hook_CamProcess, (void**)&gOCamProcess);
     
     g_ready = true;
     return nullptr;
 }
 
 extern "C" {
-    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|1.2|Aimbot Fixed Full|ahayriski"; }
+    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|2.0|Bone Aimbot|ahayriski"; }
     EXPORT void OnModLoad() {
         pthread_t t;
         pthread_create(&t, nullptr, init_thread, nullptr);
