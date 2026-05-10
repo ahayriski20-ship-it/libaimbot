@@ -4,15 +4,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Setup NDK
         uses: nvioletti/setup-ndk@v1
         with:
           ndk-version: r21e
       - name: Build with ndk-build
-        run: |
-          $ANDROID_NDK_HOME/ndk-build -C .
+        run: ndk-build -C jni/
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:

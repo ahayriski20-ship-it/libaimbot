@@ -39,15 +39,15 @@ uintptr_t GetClosestPlayer() {
     if (!g_pPedPool || !(*g_pPedPool)) return 0;
     CPool* pool = *g_pPedPool;
     
-    // Ambil posisi Local Player (biasanya index 0)
+    // Ambil posisi Local Player (index 0)
     uintptr_t localPed = (uintptr_t)pool->m_pObjects; 
     if (!localPed || (pool->m_byteMap[0] & 0x80)) return 0;
 
     RwV3d localPos = *(RwV3d*)(localPed + 0x04);
     uintptr_t target = 0;
-    float minDist = 60.0f; // Radius 60 meter
+    float minDist = 60.0f; // Jarak kunci 60 meter
 
-    for (int i = 1; i < pool->m_nSize; i++) { // Lewati local player (i=0)
+    for (int i = 1; i < pool->m_nSize; i++) {
         if (pool->m_byteMap[i] & 0x80) continue; 
         
         uintptr_t ped = (uintptr_t)pool->m_pObjects + (i * 0x7C4);
@@ -82,10 +82,9 @@ void hook_CamProcess(void* self) {
         } else {
             head = *(RwV3d*)(target + 0x04);
         }
-        head.z += 0.75f; // Lock ke Kepala
+        head.z += 0.75f; // Kunci Tepat di Kepala
 
         if (gUpdateAimingCoors && g_Camera) {
-            // Memaksa kamera mengarah ke koordinat target
             gUpdateAimingCoors((void*)g_Camera, &head, 0.0f, 0.0f, 0.0f, true);
         }
     }
@@ -105,7 +104,7 @@ static void* init_thread(void*) {
         dl_iterate_phdr(find_base, &base);
         sleep(1);
     }
-    sleep(10); // Tunggu sampai player spawn sempurna
+    sleep(10);
 
     void* hDobby = dlopen("libdobby.so", RTLD_NOW | RTLD_GLOBAL);
     if (!hDobby) return nullptr;
@@ -115,7 +114,6 @@ static void* init_thread(void*) {
     g_Camera   = (base + OFF_CAMERA);
     gUpdateAimingCoors = (fn_UpdateAimingCoors)((base + OFF_UPDATE_AIMING) | 1u);
 
-    // Hook di fungsi internal camera proses senjata
     dobbyHook((void*)((base + OFF_PROCESS_AIMING) | 1u), (void*)hook_CamProcess, (void**)&gOCamProcess);
     
     g_ready = true;
@@ -123,7 +121,7 @@ static void* init_thread(void*) {
 }
 
 extern "C" {
-    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|1.2|Aimbot Smooth Fix|ahayriski"; }
+    EXPORT void* __GetModInfo() { return (void*)"riski_aimbot|1.2|Aimbot Fixed Full|ahayriski"; }
     EXPORT void OnModLoad() {
         pthread_t t;
         pthread_create(&t, nullptr, init_thread, nullptr);
